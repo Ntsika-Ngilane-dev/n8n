@@ -34,10 +34,6 @@ export function validateEmail(value) {
     /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
 }
 
-export function validatePhone(value) {
-  return typeof value === "string" && /^\+[1-9]\d{7,14}$/.test(value.trim());
-}
-
 export function cleanText(value, maxLength = 2000) {
   return typeof value === "string" ? value.trim().slice(0, maxLength) : "";
 }

@@ -3,11 +3,9 @@ import express from "express";
 import session from "express-session";
 import rateLimit from "express-rate-limit";
 import { OAuth2Client } from "google-auth-library";
-import twilio from "twilio";
-import { randomUUID } from "node:crypto";
 import { database, listLecturerCourses, roleForEmail } from "./db.js";
 import { SqliteSessionStore } from "./session-store.js";
-import { cleanText, hashPassword, validateEmail, validatePhone, verifyPassword } from "./security.js";
+import { cleanText, hashPassword, validateEmail, verifyPassword } from "./security.js";
 
 const app = express();
 const port = Number(process.env.PORT ?? 3001);
@@ -76,38 +74,12 @@ function requireAdmin(req, res, next) {
   next();
 }
 
-function setSession(req, user, res) {
+function setSession(req, user, res, status = 200) {
   req.session.regenerate((error) => {
     if (error) return res.status(500).json({ message: "Could not start a secure session." });
     req.session.userId = user.id;
-    res.json({ user: publicUser(user) });
+    res.status(status).json({ user: publicUser(user) });
   });
-}
-
-function serviceClients() {
-  const { TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_VERIFY_SERVICE_SID } = process.env;
-  if (!TWILIO_ACCOUNT_SID || !TWILIO_AUTH_TOKEN || !TWILIO_VERIFY_SERVICE_SID) {
-    const error = new Error("WhatsApp verification is not configured on this server.");
-    error.status = 503;
-    throw error;
-  }
-  return twilio(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
-    .verify.v2.services(TWILIO_VERIFY_SERVICE_SID);
-}
-
-async function sendWhatsAppCode(phone) {
-  await serviceClients().verifications.create({
-    to: phone,
-    channel: "whatsapp",
-  });
-}
-
-async function checkWhatsAppCode(phone, code) {
-  const result = await serviceClients().verificationChecks.create({
-    to: phone,
-    code,
-  });
-  return result.status === "approved";
 }
 
 async function verifyGoogleCredential(credential) {
@@ -133,34 +105,10 @@ async function verifyGoogleCredential(credential) {
   };
 }
 
-function startPendingAuth({ flow, name, email, phone, passwordHash, googleSub }) {
-  const challengeId = randomUUID();
-  const now = Date.now();
-  database.prepare(`
-    INSERT INTO pending_auth
-      (id, flow, name, email, phone, password_hash, google_sub, expires_at, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(
-    challengeId,
-    flow,
-    name,
-    email,
-    phone,
-    passwordHash ?? null,
-    googleSub ?? null,
-    now + 10 * 60 * 1000,
-    now,
-  );
-  return challengeId;
-}
-
 const createUser = database.prepare(`
   INSERT INTO users (name, email, phone, phone_verified, password_hash, google_sub, role, created_at)
-  VALUES (?, ?, ?, 1, ?, ?, ?, ?)
+  VALUES (?, ?, NULL, 1, ?, ?, ?, ?)
 `);
-const cleanupExpiredChallenges = database.prepare(
-  "DELETE FROM pending_auth WHERE expires_at <= ?",
-);
 
 app.get("/api/auth/me", (req, res) => {
   const user = req.session.userId ? getUser.get(req.session.userId) : null;
@@ -168,16 +116,13 @@ app.get("/api/auth/me", (req, res) => {
   res.json({ user: publicUser(user) });
 });
 
-app.post("/api/auth/signup/start", async (req, res, next) => {
+app.post("/api/auth/signup", async (req, res, next) => {
   try {
     const name = cleanText(req.body?.name, 100);
     const email = cleanText(req.body?.email, 254).toLowerCase();
-    const phone = cleanText(req.body?.phone, 16);
     const password = req.body?.password;
-    if (name.length < 2 || !validateEmail(email) || !validatePhone(phone)) {
-      return res.status(400).json({
-        message: "Enter your name, a valid email, and a phone number in international format (for example +14155552671).",
-      });
+    if (name.length < 2 || !validateEmail(email)) {
+      return res.status(400).json({ message: "Enter your name and a valid email address." });
     }
     if (typeof password !== "string" || password.length < 12 || password.length > 256) {
       return res.status(400).json({ message: "Use a password between 12 and 256 characters." });
@@ -186,16 +131,23 @@ app.post("/api/auth/signup/start", async (req, res, next) => {
       return res.status(409).json({ message: "An account with this email already exists. Sign in instead." });
     }
     const passwordHash = await hashPassword(password);
-    await sendWhatsAppCode(phone);
-    cleanupExpiredChallenges.run(Date.now());
-    const challengeId = startPendingAuth({
-      flow: "password",
-      name,
-      email,
-      phone,
-      passwordHash,
-    });
-    res.status(202).json({ challengeId, message: "A verification code has been sent by WhatsApp." });
+    let result;
+    try {
+      result = createUser.run(
+        name,
+        email,
+        passwordHash,
+        null,
+        "student",
+        new Date().toISOString(),
+      );
+    } catch (error) {
+      if (error.code === "SQLITE_CONSTRAINT_UNIQUE") {
+        return res.status(409).json({ message: "An account with this email already exists. Sign in instead." });
+      }
+      throw error;
+    }
+    setSession(req, getUser.get(result.lastInsertRowid), res, 201);
   } catch (error) {
     next(error);
   }
@@ -211,99 +163,24 @@ app.post("/api/auth/google", async (req, res, next) => {
       if (user.google_sub && user.google_sub !== identity.sub) {
         return res.status(409).json({ message: "This email is linked to a different Google account." });
       }
-      if (!user.phone_verified) {
-        return res.status(403).json({ message: "Verify your phone number before signing in." });
+      const trustedRole = roleForEmail(identity.email);
+      if (user.role === "student" && trustedRole !== "student") {
+        database.prepare("UPDATE users SET google_sub = ?, role = ? WHERE id = ?")
+          .run(identity.sub, trustedRole, user.id);
+      } else {
+        database.prepare("UPDATE users SET google_sub = ? WHERE id = ?").run(identity.sub, user.id);
       }
-      database.prepare("UPDATE users SET google_sub = ? WHERE id = ?").run(identity.sub, user.id);
       return setSession(req, getUser.get(user.id), res);
     }
-    res.json({
-      needsPhone: true,
-      credential: req.body.credential,
-      name: identity.name,
-      email: identity.email,
-    });
-  } catch (error) {
-    next(error);
-  }
-});
-
-app.post("/api/auth/google/start", async (req, res, next) => {
-  try {
-    const identity = await verifyGoogleCredential(req.body?.credential);
-    const phone = cleanText(req.body?.phone, 16);
-    if (!validatePhone(phone)) {
-      return res.status(400).json({ message: "Enter a phone number in international format (for example +14155552671)." });
-    }
-    const existing = database.prepare(
-      "SELECT * FROM users WHERE google_sub = ? OR email = ? COLLATE NOCASE",
-    ).get(identity.sub, identity.email);
-    if (existing) {
-      if (!existing.phone_verified) {
-        return res.status(403).json({ message: "Verify your phone number before signing in." });
-      }
-      if (existing.google_sub && existing.google_sub !== identity.sub) {
-        return res.status(409).json({ message: "This email is linked to a different Google account." });
-      }
-      database.prepare(
-        "UPDATE users SET google_sub = ?, phone = COALESCE(phone, ?) WHERE id = ?",
-      ).run(identity.sub, phone, existing.id);
-      return setSession(req, getUser.get(existing.id), res);
-    }
-    await sendWhatsAppCode(phone);
-    cleanupExpiredChallenges.run(Date.now());
-    const challengeId = startPendingAuth({
-      flow: "google",
-      name: identity.name,
-      email: identity.email,
-      phone,
-      googleSub: identity.sub,
-    });
-    res.status(202).json({ challengeId, message: "A verification code has been sent by WhatsApp." });
-  } catch (error) {
-    next(error);
-  }
-});
-
-app.post("/api/auth/whatsapp/verify", async (req, res, next) => {
-  try {
-    const challengeId = cleanText(req.body?.challengeId, 50);
-    const code = cleanText(req.body?.code, 10);
-    if (!challengeId || !/^\d{4,10}$/.test(code)) {
-      return res.status(400).json({ message: "Enter the WhatsApp verification code." });
-    }
-    const pending = database.prepare("SELECT * FROM pending_auth WHERE id = ?").get(challengeId);
-    if (!pending || pending.expires_at <= Date.now()) {
-      if (pending) database.prepare("DELETE FROM pending_auth WHERE id = ?").run(challengeId);
-      return res.status(400).json({ message: "This verification code has expired. Start again to receive a new code." });
-    }
-    if (!(await checkWhatsAppCode(pending.phone, code))) {
-      return res.status(400).json({ message: "That verification code is incorrect or expired." });
-    }
-
-    const existing = getByEmail.get(pending.email);
-    if (existing) {
-      if (pending.flow !== "google" || existing.google_sub !== pending.google_sub) {
-        return res.status(409).json({ message: "An account with this email already exists. Sign in instead." });
-      }
-      database.prepare("DELETE FROM pending_auth WHERE id = ?").run(challengeId);
-      return setSession(req, getUser.get(existing.id), res);
-    }
-
-    const insertUser = database.transaction(() => {
-      const result = createUser.run(
-        pending.name,
-        pending.email,
-        pending.phone,
-        pending.password_hash,
-        pending.google_sub,
-        roleForEmail(pending.email),
-        new Date().toISOString(),
-      );
-      database.prepare("DELETE FROM pending_auth WHERE id = ?").run(challengeId);
-      return getUser.get(result.lastInsertRowid);
-    });
-    setSession(req, insertUser(), res);
+    const result = createUser.run(
+      identity.name,
+      identity.email,
+      null,
+      identity.sub,
+      roleForEmail(identity.email),
+      new Date().toISOString(),
+    );
+    setSession(req, getUser.get(result.lastInsertRowid), res, 201);
   } catch (error) {
     next(error);
   }
@@ -319,9 +196,6 @@ app.post("/api/auth/signin", async (req, res, next) => {
     const user = getByEmail.get(email);
     if (!user?.password_hash || !(await verifyPassword(password, user.password_hash))) {
       return res.status(401).json({ message: "Email or password is incorrect." });
-    }
-    if (!user.phone_verified) {
-      return res.status(403).json({ message: "Verify your phone number before signing in." });
     }
     setSession(req, getUser.get(user.id), res);
   } catch (error) {
@@ -475,7 +349,7 @@ async function bootstrapAdmin() {
     return;
   }
   const passwordHash = await hashPassword(password);
-  createUser.run(name, email, null, passwordHash, null, "admin", new Date().toISOString());
+  createUser.run(name, email, passwordHash, null, "admin", new Date().toISOString());
 }
 
 await bootstrapAdmin();

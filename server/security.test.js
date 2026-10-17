@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import Database from "better-sqlite3";
 import { SqliteSessionStore } from "./session-store.js";
-import { hashPassword, validateEmail, validatePhone, verifyPassword } from "./security.js";
+import { hashPassword, validateEmail, verifyPassword } from "./security.js";
 
 test("password hashes are salted and only verify the matching password", async () => {
   const password = "correct horse battery staple";
@@ -14,11 +14,9 @@ test("password hashes are salted and only verify the matching password", async (
   assert.equal(await verifyPassword("incorrect password", hash), false);
 });
 
-test("email and WhatsApp phone validation require expected formats", () => {
+test("email validation requires an expected format", () => {
   assert.equal(validateEmail("student@example.com"), true);
   assert.equal(validateEmail("not-an-email"), false);
-  assert.equal(validatePhone("+14155552671"), true);
-  assert.equal(validatePhone("4155552671"), false);
 });
 
 test("SQLite session store persists, expires, and deletes a session", async () => {
