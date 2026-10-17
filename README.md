@@ -18,6 +18,19 @@ A React feedback form with a Node API, persistent SQLite storage, Google sign-in
 
 The API creates its SQLite database and session store under `data/`. These files are ignored by Git and should be backed up and protected like other account data.
 
+## Deploying to Vercel
+
+The Vercel deployment uses the React build plus serverless handlers under `api/`; it does not run `server/index.js`. The serverless API requires a persistent PostgreSQL database. Add these environment variables in the Vercel project settings and redeploy:
+
+- `POSTGRES_URL` — a pooled PostgreSQL connection string from a Vercel Postgres/Neon integration. `DATABASE_URL` is also accepted.
+- `SESSION_SECRET` — a random secret of at least 32 characters. Use a different value from development.
+- `GOOGLE_CLIENT_ID` and `VITE_GOOGLE_CLIENT_ID` — the same OAuth web client ID. `VITE_GOOGLE_CLIENT_ID` must be present for the production build so the browser can render Google sign-in.
+- `N8N_WEBHOOK_URL` — the published n8n production webhook URL.
+- `INITIAL_ADMIN_NAME`, `INITIAL_ADMIN_EMAIL`, and `INITIAL_ADMIN_PASSWORD` — the initial admin account; the password must be at least 12 characters.
+- `ADMIN_EMAILS` and `LECTURER_COURSES` — optional trusted roles and lecturer course mappings.
+
+Set the public client ID as `VITE_GOOGLE_CLIENT_ID` for the **Production** deployment environment. In Google Cloud, add `https://coursefeedback-delta.vercel.app` to the OAuth client’s authorized JavaScript origins, and ensure the OAuth consent screen allows the account used to sign in. Never set or expose the Google client secret as a `VITE_` variable. The API creates its PostgreSQL tables automatically on its first request. Local accounts and feedback in `data/feedback.sqlite` are not automatically copied to Postgres.
+
 ## Google sign-in
 
 1. Create a Google OAuth 2.0 **Web application** client in Google Cloud Console.
