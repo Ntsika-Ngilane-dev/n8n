@@ -1,103 +1,125 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useState } from "react";
+import {
+  createUserWithEmailAndPassword,
+  GoogleAuthProvider,
+  sendEmailVerification,
+  signInWithEmailAndPassword,
+  signInWithPopup,
+  signOut,
+  updateProfile,
+} from "firebase/auth";
+import { firebaseAuth } from "./firebase.js";
 
-const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID;
+function getAuthErrorMessage(error) {
+  const messages = {
+    "auth/email-already-in-use": "That email already has an account. Sign in instead.",
+    "auth/invalid-email": "Enter a valid email address.",
+    "auth/weak-password": "Choose a password with at least 12 characters.",
+    "auth/too-many-requests": "Too many attempts. Wait a little and try again.",
+    "auth/popup-closed-by-user": "Google sign-in was closed before it finished.",
+    "auth/popup-blocked": "Your browser blocked the Google sign-in window. Allow pop-ups and try again.",
+    "auth/unauthorized-domain": "This site is not authorized in Firebase Authentication settings.",
+    "auth/operation-not-allowed": "Enable this sign-in method in Firebase Authentication settings.",
+    "auth/user-not-found": "No account was found for that email. Create an account first.",
+    "auth/wrong-password": "The email or password is incorrect.",
+    "auth/invalid-credential": "The email or password is incorrect.",
+    "auth/network-request-failed": "Could not reach Firebase. Check your connection and try again.",
+  };
+  return messages[error.code] ?? error.message ?? "Authentication could not be completed.";
+}
 
-async function request(url, body) {
-  const response = await fetch(url, {
+async function createAppSession(user) {
+  const credential = await user.getIdToken();
+  const response = await fetch("/api/auth/firebase", {
     method: "POST",
     credentials: "same-origin",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
+    body: JSON.stringify({ credential }),
   });
   const result = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(result.message ?? "The request could not be completed.");
+  if (!response.ok) {
+    throw new Error(result.message ?? "Sign-in could not be completed.");
+  }
   return result;
 }
 
 function AuthPanel({ onAuthenticated, initialError }) {
-  const [mode, setMode] = useState("signin");
-  const [form, setForm] = useState({ name: "", email: "", password: "" });
-  const [message, setMessage] = useState(initialError);
+  const [isCreatingAccount, setIsCreatingAccount] = useState(false);
   const [isBusy, setIsBusy] = useState(false);
-  const googleButtonRef = useRef(null);
+  const [message, setMessage] = useState(initialError);
 
-  useEffect(() => {
-    if (!GOOGLE_CLIENT_ID || !googleButtonRef.current) return undefined;
-    let isActive = true;
-    const renderGoogleButton = () => {
-      if (!isActive || !window.google?.accounts?.id || !googleButtonRef.current) return;
-      window.google.accounts.id.initialize({
-        client_id: GOOGLE_CLIENT_ID,
-        callback: async ({ credential }) => {
-          setMessage("");
-          setIsBusy(true);
-          try {
-            const result = await request("/api/auth/google", { credential });
-            onAuthenticated(result.user);
-          } catch (error) {
-            setMessage(error.message);
-          } finally {
-            setIsBusy(false);
-          }
-        },
-      });
-      window.google.accounts.id.renderButton(googleButtonRef.current, {
-        type: "standard",
-        theme: "outline",
-        size: "large",
-        shape: "rectangular",
-        text: "continue_with",
-        width: Math.min(380, googleButtonRef.current.clientWidth || 380),
-      });
-    };
-
-    if (window.google?.accounts?.id) {
-      renderGoogleButton();
-    } else {
-      const script = document.createElement("script");
-      script.src = "https://accounts.google.com/gsi/client";
-      script.async = true;
-      script.defer = true;
-      script.onload = renderGoogleButton;
-      script.onerror = () => setMessage("Google sign-in could not be loaded.");
-      document.head.appendChild(script);
-    }
-    return () => {
-      isActive = false;
-    };
-  }, [onAuthenticated]);
-
-  function update(event) {
-    const { name, value } = event.target;
-    setForm((current) => ({ ...current, [name]: value }));
-    if (message) setMessage("");
-  }
-
-  async function submitPasswordForm(event) {
-    event.preventDefault();
+  async function handleGoogleSignIn() {
+    if (!firebaseAuth) return;
     setMessage("");
     setIsBusy(true);
     try {
-      if (mode === "signin") {
-        const result = await request("/api/auth/signin", {
-          email: form.email,
-          password: form.password,
-        });
-        onAuthenticated(result.user);
-      } else {
-        const result = await request("/api/auth/signup", form);
-        onAuthenticated(result.user);
+      const provider = new GoogleAuthProvider();
+      provider.setCustomParameters({ prompt: "select_account" });
+      const result = await signInWithPopup(firebaseAuth, provider);
+      if (!result.user.emailVerified) {
+        await signOut(firebaseAuth);
+        setMessage("Google did not verify your email address. Try another account.");
+        return;
       }
+      const session = await createAppSession(result.user);
+      onAuthenticated(session.user);
     } catch (error) {
-      setMessage(error.message);
+      setMessage(getAuthErrorMessage(error));
     } finally {
       setIsBusy(false);
     }
   }
 
-  function returnToForm(nextMode = mode) {
-    setMode(nextMode);
+  async function handleSubmit(event) {
+    event.preventDefault();
+    if (!firebaseAuth || !event.currentTarget.reportValidity()) return;
+
+    const formElement = event.currentTarget;
+    const formData = new FormData(formElement);
+    const email = String(formData.get("email")).trim();
+    const password = String(formData.get("password"));
+    const name = String(formData.get("name") ?? "").trim();
+
     setMessage("");
+    setIsBusy(true);
+    try {
+      if (isCreatingAccount) {
+        const account = await createUserWithEmailAndPassword(firebaseAuth, email, password);
+        await updateProfile(account.user, { displayName: name });
+        await sendEmailVerification(account.user);
+        await signOut(firebaseAuth);
+        formElement.reset();
+        setIsCreatingAccount(false);
+        setMessage("Account created. Check your email and verify your address before signing in.");
+        return;
+      }
+
+      const account = await signInWithEmailAndPassword(firebaseAuth, email, password);
+      if (!account.user.emailVerified) {
+        await sendEmailVerification(account.user);
+        await signOut(firebaseAuth);
+        setMessage("Verify your email before signing in. We sent you a new verification link.");
+        return;
+      }
+      const session = await createAppSession(account.user);
+      onAuthenticated(session.user);
+    } catch (error) {
+      if (firebaseAuth.currentUser) {
+        try {
+          await signOut(firebaseAuth);
+        } catch (signOutError) {
+          console.error("Could not clear the Firebase client session:", signOutError.message);
+        }
+      }
+      setMessage(getAuthErrorMessage(error));
+    } finally {
+      setIsBusy(false);
+    }
+  }
+
+  function toggleMode() {
+    setMessage("");
+    setIsCreatingAccount((current) => !current);
   }
 
   return (
@@ -118,45 +140,86 @@ function AuthPanel({ onAuthenticated, initialError }) {
 
       <section className="auth-card">
         <p className="card-kicker">NORTHSTAR LEARNING</p>
-        <h2 id="auth-title">{mode === "signin" ? "Welcome back" : "Create your account"}</h2>
+        <h2 id="auth-title">{isCreatingAccount ? "Create your account" : "Welcome back"}</h2>
         <p className="auth-subtitle">
-          {mode === "signin"
-            ? "Sign in to continue to your student space."
-            : "Create an account to share your course feedback."}
+          {isCreatingAccount
+            ? "Create an account to share your course feedback."
+            : "Sign in to continue to your student space."}
         </p>
-        {GOOGLE_CLIENT_ID ? (
-          <div className="google-button-frame" ref={googleButtonRef} />
-        ) : (
-          <p className="google-config-note">Google sign-in is available after a client ID is configured.</p>
-        )}
+
+        <button
+          className="auth-google-button"
+          type="button"
+          onClick={handleGoogleSignIn}
+          disabled={isBusy || !firebaseAuth}
+        >
+          <svg aria-hidden="true" viewBox="0 0 48 48">
+            <path fill="#EA4335" d="M24 9.5c3.5 0 6.6 1.2 9 3.6l6.7-6.7C35.6 2.5 30.3 0 24 0 14.6 0 6.5 5.4 2.6 13.3l7.8 6.1C12.2 13.6 17.6 9.5 24 9.5Z" transform="translate(0 5)" />
+            <path fill="#4285F4" d="M46.1 24.5c0-1.6-.1-3.1-.4-4.5H24v9h12.4c-.5 2.9-2.1 5.4-4.5 7.1l7.3 5.7c4.3-4 6.9-9.9 6.9-17.3Z" transform="translate(0 0)" />
+            <path fill="#FBBC05" d="M10.4 28.7a14.6 14.6 0 0 1 0-9.4l-7.8-6.1a24 24 0 0 0 0 21.6l7.8-6.1Z" transform="translate(0 0)" />
+            <path fill="#34A853" d="M24 48c6.5 0 12-2.1 16-5.8l-7.3-5.7c-2 1.4-4.7 2.3-8.7 2.3-6.4 0-11.8-4.1-13.7-9.8l-7.8 6.1C6.5 43.6 14.6 48 24 48Z" transform="translate(0 0)" />
+          </svg>
+          Continue with Google
+        </button>
+
         <div className="auth-divider"><span>or continue with email</span></div>
 
-        <form onSubmit={submitPasswordForm}>
-          {mode === "signup" && (
+        <form onSubmit={handleSubmit}>
+          {isCreatingAccount && (
             <div className="field">
-              <label htmlFor="signup-name">Full name</label>
-              <input id="signup-name" name="name" autoComplete="name" minLength="2" maxLength="100" value={form.name} onChange={update} required />
+              <label htmlFor="accountName">Full name</label>
+              <input
+                autoComplete="name"
+                id="accountName"
+                maxLength="100"
+                name="name"
+                required
+                type="text"
+              />
             </div>
           )}
           <div className="field">
-            <label htmlFor="auth-email">Email address</label>
-            <input id="auth-email" name="email" type="email" autoComplete="email" maxLength="254" value={form.email} onChange={update} required />
+            <label htmlFor="accountEmail">Email address</label>
+            <input
+              autoComplete="email"
+              id="accountEmail"
+              maxLength="254"
+              name="email"
+              required
+              type="email"
+            />
           </div>
           <div className="field">
-            <label htmlFor="auth-password">Password</label>
-            <input id="auth-password" name="password" type="password" autoComplete={mode === "signin" ? "current-password" : "new-password"} minLength={mode === "signup" ? 12 : undefined} maxLength="256" value={form.password} onChange={update} required />
-            {mode === "signup" && <span className="field-hint">Use at least 12 characters. Your password is stored as a secure hash.</span>}
+            <label htmlFor="accountPassword">Password</label>
+            <input
+              autoComplete={isCreatingAccount ? "new-password" : "current-password"}
+              id="accountPassword"
+              minLength={isCreatingAccount ? 12 : undefined}
+              name="password"
+              required
+              type="password"
+            />
+            {isCreatingAccount && (
+              <small className="field-hint">Use at least 12 characters. Firebase securely manages your password.</small>
+            )}
           </div>
+          {!firebaseAuth && (
+            <p className="google-config-note" role="status">
+              Firebase Authentication is not configured for this deployment.
+            </p>
+          )}
           {message && <p className="auth-message" role="alert">{message}</p>}
-          <button className="submit-button" type="submit" disabled={isBusy}>
-            {isBusy ? "Please wait…" : mode === "signin" ? "Sign in" : "Create account"}
-            {!isBusy && <span aria-hidden="true">→</span>}
+          {isBusy && <p className="auth-subtitle" role="status">Please wait…</p>}
+          <button className="submit-button auth-submit-button" type="submit" disabled={isBusy || !firebaseAuth}>
+            {isCreatingAccount ? "Create account" : "Sign in"}
+            <span aria-hidden="true">→</span>
           </button>
         </form>
+
         <p className="auth-switch">
-          {mode === "signin" ? "New to Northstar?" : "Already have an account?"}{" "}
-          <button onClick={() => returnToForm(mode === "signin" ? "signup" : "signin")}>
-            {mode === "signin" ? "Create an account" : "Sign in"}
+          {isCreatingAccount ? "Already have an account?" : "New to Northstar?"}{" "}
+          <button type="button" onClick={toggleMode} disabled={isBusy}>
+            {isCreatingAccount ? "Sign in" : "Create an account"}
           </button>
         </p>
       </section>

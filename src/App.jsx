@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
+import { signOut as signOutFirebase } from "firebase/auth";
 import AuthPanel from "./AuthPanel.jsx";
-import StaffDashboard from "./StaffDashboard.jsx";
+import { firebaseAuth } from "./firebase.js";
 
 const initialForm = { courseName: "", rating: "", feedbackMessage: "" };
 
@@ -66,12 +67,21 @@ function App() {
   async function signOut() {
     try {
       await apiRequest("/api/auth/signout", { method: "POST" });
-      setUser(null);
-      setForm(initialForm);
-      setStatus({ type: "", message: "" });
     } catch (error) {
       setAuthError(error.message);
+      return;
     }
+
+    if (firebaseAuth) {
+      try {
+        await signOutFirebase(firebaseAuth);
+      } catch (error) {
+        setAuthError(error.message);
+      }
+    }
+    setUser(null);
+    setForm(initialForm);
+    setStatus({ type: "", message: "" });
   }
 
   if (checkingSession) {
@@ -89,18 +99,7 @@ function App() {
         <AuthPanel
           onAuthenticated={setUser}
           initialError={authError}
-          onErrorDismiss={() => setAuthError("")}
         />
-        <SiteFooter />
-      </main>
-    );
-  }
-
-  if (user.role !== "student") {
-    return (
-      <main className="page-shell">
-        <SiteHeader user={user} onSignOut={signOut} />
-        <StaffDashboard user={user} />
         <SiteFooter />
       </main>
     );
@@ -132,12 +131,40 @@ function App() {
             <div>
               <p className="card-kicker">COURSE FEEDBACK</p>
               <h2>Share your experience</h2>
-              <p className="signed-in-as">Signed in as {user.name} · {user.email}</p>
             </div>
             <span className="time-badge">1 MIN</span>
           </div>
 
           <form onSubmit={handleSubmit}>
+            <div className="field-row">
+              <div className="field">
+                <label htmlFor="studentName">Student name</label>
+                <input
+                  id="studentName"
+                  name="studentName"
+                  type="text"
+                  value={user.name}
+                  maxLength="100"
+                  readOnly
+                  required
+                />
+              </div>
+              <div className="field">
+                <label htmlFor="studentEmail">Email address</label>
+                <input
+                  id="studentEmail"
+                  name="email"
+                  type="email"
+                  value={user.email}
+                  maxLength="254"
+                  readOnly
+                  required
+                />
+              </div>
+            </div>
+            <p className="field-hint identity-hint">
+              Verified from your signed-in account.
+            </p>
             <div className="field">
               <label htmlFor="courseName">Course name</label>
               <input
@@ -230,8 +257,8 @@ function SiteHeader({ user, onSignOut }) {
         {user && (
           <>
             <span className="user-pill">
-              <span className={`role-dot ${user.role}`} />
-              {user.name} · {user.role === "admin" ? "Lead lecturer · Admin" : "Lecturer"}
+              <span className="role-dot student" />
+              {user.name}
             </span>
             <button className="signout-button" onClick={onSignOut}>Sign out</button>
           </>

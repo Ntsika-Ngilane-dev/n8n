@@ -69,9 +69,36 @@ test("workflow routes ratings at or below two to follow-up and higher ratings po
   );
 });
 
+test("workflow maps every feedback field to the existing Sheet1 tab", () => {
+  const sheetsParameters = nodes.get("Append to Google Sheets").parameters;
+
+  assert.equal(sheetsParameters.sheetName.value, "Sheet1");
+  assert.deepEqual(Object.keys(sheetsParameters.columns.value), [
+    "submittedAt",
+    "studentName",
+    "email",
+    "courseName",
+    "rating",
+    "feedbackMessage",
+    "feedbackStatus",
+  ]);
+});
+
 test("webhook response mode is compatible with n8n Respond to Webhook nodes", () => {
   assert.equal(
     nodes.get("Receive Feedback").parameters.responseMode,
     "responseNode",
+  );
+});
+
+test("the workflow confirms a sheet append even if the thank-you email fails", () => {
+  assert.equal(
+    workflow.connections["Append to Google Sheets"].main[0][0].node,
+    "Send Thank-you Email",
+  );
+  assert.equal(nodes.get("Send Thank-you Email").onError, "continueRegularOutput");
+  assert.equal(
+    workflow.connections["Send Thank-you Email"].main[0][0].node,
+    "Confirm Submission",
   );
 });

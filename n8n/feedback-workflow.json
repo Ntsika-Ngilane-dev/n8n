@@ -181,12 +181,12 @@
         "operation": "append",
         "documentId": {
           "__rl": true,
-          "value": "REPLACE_WITH_GOOGLE_SHEET_ID",
+          "value": "1S5ODqTPFpVGAvGJ5TBk1EKUA5knlO8kw3gQGlpjCvr8",
           "mode": "id"
         },
         "sheetName": {
           "__rl": true,
-          "value": "Feedback",
+          "value": "Sheet1",
           "mode": "name"
         },
         "columns": {
@@ -293,6 +293,7 @@
       "name": "Send Thank-you Email",
       "type": "n8n-nodes-base.gmail",
       "typeVersion": 2.1,
+      "onError": "continueRegularOutput",
       "position": [
         680,
         120

@@ -1,97 +1,80 @@
 # Student Feedback
 
-A React feedback form with a Node API, persistent SQLite storage, Google sign-in, password accounts, and lecturer/administrator review dashboards. Passwords are stored as salted `scrypt` hashes, never as plain text. Feedback is stored in the local application database and forwarded to the n8n workflow, which appends it to Google Sheets and sends the student an email.
+A React feedback form with Firebase email/password and Google sign-in. Submitted feedback is sent to an n8n workflow, which validates it, appends it to Google Sheets, assigns a status based on the rating, and sends a thank-you email.
 
 ## Run locally
 
 1. Install Node.js 22 or later and run `npm install`.
-2. Copy `.env.example` to `.env`. Vite and the API both read this file.
-3. Set `SESSION_SECRET` to a random secret of at least 32 characters. For PowerShell, generate one with:
+2. Copy `.env.example` to `.env`.
+3. Set `SESSION_SECRET` to a random secret of at least 32 characters. In PowerShell, generate one with:
 
    ```powershell
    [Convert]::ToBase64String([Security.Cryptography.RandomNumberGenerator]::GetBytes(32))
    ```
 
-4. Configure the Google and n8n values described below.
-5. In one terminal, run `npm run server`. In another, run `npm run dev` and open the Vite URL. The Vite development server proxies `/api` requests to the API on port 3001.
-6. Run `npm test` to check password hashing, input format validation, and persisted session behavior.
+4. Configure Firebase Authentication and copy the Firebase Web app settings as described below.
+5. Set `N8N_WEBHOOK_URL` to the n8n webhook test URL while listening for a test event, or to the production URL after activating the workflow.
+6. In one terminal run `npm run server`; in another run `npm run dev`. Open the Vite URL.
+7. Run `npm test` and `npm run build` to validate the application.
 
-The API creates its SQLite database and session store under `data/`. These files are ignored by Git and should be backed up and protected like other account data.
+The Vite development server proxies `/api` requests to the local API on port 3001.
 
-## Deploying to Vercel
+## Data and accounts
 
-The Vercel deployment uses the React build plus serverless handlers under `api/`; it does not run `server/index.js`. The serverless API requires a persistent PostgreSQL database. Add these environment variables in the Vercel project settings and redeploy:
+- Firebase Authentication manages email/password accounts and Google sign-in. Email/password accounts must verify their email before signing in.
+- The API verifies Firebase ID tokens and sets an eight-hour, signed, `HttpOnly` session cookie. Passwords are never stored in the app or Google Sheets.
+- The app has no separate user database, lecturer/admin roles, review dashboard, or analytics dashboard.
+- Feedback is stored in the Google Sheet configured in n8n. The API does not save a separate local or PostgreSQL copy.
+- Each Sheet row contains the verified student's name and email, course name, rating, feedback message, status, and workflow submission timestamp. The Submit button is an action, not a stored field.
+- Existing records in a previous SQLite or PostgreSQL database are not automatically migrated to Google Sheets.
 
-- `POSTGRES_URL` — a pooled PostgreSQL connection string from a Vercel Postgres/Neon integration. `DATABASE_URL` is also accepted.
-- `SESSION_SECRET` — a random secret of at least 32 characters. Use a different value from development.
-- `GOOGLE_CLIENT_ID` and `VITE_GOOGLE_CLIENT_ID` — the same OAuth web client ID. `VITE_GOOGLE_CLIENT_ID` must be present for the production build so the browser can render Google sign-in.
-- `N8N_WEBHOOK_URL` — the published n8n production webhook URL.
-- `INITIAL_ADMIN_NAME`, `INITIAL_ADMIN_EMAIL`, and `INITIAL_ADMIN_PASSWORD` — the initial admin account; the password must be at least 12 characters.
-- `ADMIN_EMAILS` and `LECTURER_COURSES` — optional trusted roles and lecturer course mappings.
+## Configure Firebase Authentication
 
-Set the public client ID as `VITE_GOOGLE_CLIENT_ID` for the **Production** deployment environment. In Google Cloud, add `https://coursefeedback-delta.vercel.app` to the OAuth client’s authorized JavaScript origins, and ensure the OAuth consent screen allows the account used to sign in. Never set or expose the Google client secret as a `VITE_` variable. The API creates its PostgreSQL tables automatically on its first request. Local accounts and feedback in `data/feedback.sqlite` are not automatically copied to Postgres.
+1. In the Firebase console, add Firebase to your Google Cloud project (or create a Firebase project) and register a Web app.
+2. In **Authentication → Sign-in method**, enable **Email/Password** and **Google**. Add `localhost` and your deployed app domain to the authorized domains.
+3. Copy the Web app's API key, Auth domain, project ID, and app ID into `.env`:
+   - `VITE_FIREBASE_API_KEY`
+   - `VITE_FIREBASE_AUTH_DOMAIN`
+   - `VITE_FIREBASE_PROJECT_ID`
+   - `VITE_FIREBASE_APP_ID`
+4. Set `FIREBASE_API_KEY` to the same public Firebase API key. The server uses it to verify ID tokens with Firebase; no service-account key is needed.
+5. Set `SESSION_SECRET` to a random secret of at least 32 characters. Do not use the Google OAuth client secret in the app or commit it.
 
-## Google sign-in
-
-1. Create a Google OAuth 2.0 **Web application** client in Google Cloud Console.
-2. Add the local Vite origin (normally `http://localhost:5173`) to **Authorized JavaScript origins**. Add the deployed web-app origin for production.
-3. Set both `GOOGLE_CLIENT_ID` and `VITE_GOOGLE_CLIENT_ID` in `.env` to that OAuth client ID.
-
-Google Identity Services authenticates existing Google-linked accounts and creates new accounts after Google verifies the email address. A verified Google email matching an existing password account can link to that account.
-
-## Accounts and roles
-
-- **Students** can sign up with email/password or Google, then submit feedback. The API takes the student name and email from the authenticated session rather than trusting form input.
-- **Lecturers** use the same sign-in flow. Set `LECTURER_COURSES` to a JSON mapping from lecturer email to their assigned course names. For example: `{"lee@example.com":["React Basics","UX Design"]}`. Lecturers can view and filter only feedback for those courses.
-- **Lead lecturer / administrator accounts** can view all course reviews and an all-course overview with review totals, average ratings, and low-rating counts. They have broader access than lecturers, who are restricted to assigned courses. Bootstrap an administrator by setting `INITIAL_ADMIN_NAME`, `INITIAL_ADMIN_EMAIL`, and `INITIAL_ADMIN_PASSWORD` before starting the API. The password must be at least 12 characters. The configured account is assigned the administrator role at startup. Additional trusted admin email addresses can be listed in `ADMIN_EMAILS` (comma-separated); they receive the admin role after Google sign-in verifies their email.
-
-Keep role configuration and administrator credentials private. Do not put secrets in `VITE_` variables; Vite exposes those values to browsers. The Google client ID is public configuration, while the session secret and admin password must remain server-side.
-
-## n8n, Google Sheets, and Gmail
+## Configure n8n and Google Sheets
 
 1. Import [`n8n/feedback-workflow.json`](./n8n/feedback-workflow.json) into n8n.
-2. Create a Google Sheet with a tab named `Feedback` and this header row:
+2. Use a sheet tab named `Sheet1` and add this header row in row 1:
 
    `submittedAt | studentName | email | courseName | rating | feedbackMessage | feedbackStatus`
 
-3. In Google Cloud, enable the Google Sheets API, Google Drive API, and Gmail API. Add the redirect URI shown by each n8n OAuth2 credential to the Google OAuth client and configure the OAuth consent screen/test users.
-4. In n8n, create Google Sheets OAuth2 and Gmail OAuth2 credentials with the Google client ID and client secret. Authorize the Google account that can edit the sheet and send the thank-you emails. Keep the client secret in n8n's credential store; do not add it to `.env` or the workflow export.
-5. Select the Google Sheets credential and spreadsheet/tab in **Append to Google Sheets**. Select the Gmail credential in **Send Thank-you Email**.
-6. Activate the workflow and set `N8N_WEBHOOK_URL` in `.env` to its production webhook URL. For local testing, use the webhook test URL while the workflow is listening for a test event.
+3. In Google Cloud, enable the Google Sheets API, Google Drive API, and Gmail API. Configure the OAuth consent screen and add the redirect URI shown by the n8n credentials.
+4. In n8n, create and authorize Google Sheets OAuth2 and Gmail OAuth2 credentials. Select them in the **Append to Google Sheets** and **Send Thank-you Email** nodes. Keep client secrets in n8n's credential store.
+5. Replace `REPLACE_WITH_GOOGLE_SHEET_ID` in the Sheets node with the ID of your spreadsheet and select the `Sheet1` tab.
+6. Activate the workflow. Set `N8N_WEBHOOK_URL` to its production webhook URL for deployment; use the test URL only while the workflow is listening for a test event.
 
-The application first saves a review to its SQLite database, then forwards it to n8n. If n8n or the email step is unavailable, the student is told the feedback was saved but automation did not complete; the local dashboard data remains available. Credentials and database files are not sent to n8n.
+The workflow validates required fields, email format, text lengths, and an integer rating from 1 to 5. Ratings 1–2 are marked **Needs follow-up**; ratings 3–5 are marked **Positive**. The Sheet append happens before the thank-you email. If Gmail fails, the workflow still confirms the saved submission; if the Sheet append or workflow fails, the app displays an error instead of claiming the feedback was saved.
 
-## Review dashboard
+## Deploy to Vercel
 
-- The **Reviews** area displays student names, course names, ratings, messages, review status, and submission date.
-- **Group by course** filters the list to one course. Clicking an administrator course summary applies that same filter.
-- Administrators also see totals and course-level analytics.
-- Lecturers see only their assigned courses. Configure assignments in `LECTURER_COURSES`; an empty assignment grants no review access.
+The Vercel deployment uses the React build and serverless API under `api/`; it does not run `server/index.js`. Configure these environment variables in the Vercel project:
 
-## Workflow nodes
+- `SESSION_SECRET` — random secret of at least 32 characters.
+- `FIREBASE_API_KEY` — Firebase Web app API key used by the server to verify ID tokens.
+- `VITE_FIREBASE_API_KEY`, `VITE_FIREBASE_AUTH_DOMAIN`, `VITE_FIREBASE_PROJECT_ID`, `VITE_FIREBASE_APP_ID` — Firebase Web app configuration used in the client build; these values are public.
+- `N8N_WEBHOOK_URL` — the active n8n production webhook URL.
 
-1. **Receive Feedback** — accepts a JSON `POST` at `/webhook/student-feedback`.
-2. **Validate Feedback** — checks required values, email format, and integer rating from 1 to 5.
-3. **Is Submission Valid?** — returns a JSON `400` for invalid requests.
-4. **Rating 2 or Below?** — routes 1–2 to **Needs follow-up** and 3–5 to **Positive**.
-5. **Append to Google Sheets** — stores the submission and status.
-6. **Send Thank-you Email** — uses the connected Gmail account to acknowledge the student after the sheet append succeeds.
-7. **Confirm Submission** — returns a success response to the API.
+No PostgreSQL, SQLite, service-account key, or separate application database is required. After changing environment variables, redeploy so they take effect.
 
 ## Loom walkthrough and reflection
 
-Record a short Loom walkthrough after configuring the external services:
+Record a short walkthrough after configuring Google OAuth and the n8n integrations:
 
-- Demonstrate email/password sign-up, sign-in, and (if configured) Google sign-in.
-- Show a student submitting a low rating and a higher rating.
-- Show the administrator dashboard, course summaries, and course filter. If possible, sign in as a lecturer and show the limited assigned-course view.
-- Show the n8n canvas, explain each node, then show the saved Google Sheets rows and thank-you email.
-- Include a screenshot of the n8n workflow in your submitted documentation.
+- Demonstrate account creation with email verification, Google sign-in, and a feedback submission.
+- Show the n8n canvas, explain each node, and show the corresponding Google Sheets row and thank-you email.
+- Include a screenshot of the workflow.
 
 Reflection prompts:
 
-- **What challenges did you encounter?** Consider matching front-end and workflow fields, configuring OAuth, and limiting review access by role.
-- **How did you solve them?** Explain the API configuration and how you tested sign-up, rating branches, and lecturer course scope.
-- **What did you learn about workflow automation?** Describe how identity, validation, conditional routing, storage, and notification work together.
-
-https://console.cloud.google.com/auth/clients/815269896389-r4r1u9pqhuonnpcmhs659plohaii7k9o.apps.googleusercontent.com?organizationId=0&project=glassy-land-469613-n7
+- **What challenges did you encounter?** Consider matching form and workflow field names and configuring Google OAuth credentials.
+- **How did you solve them?** Explain how you verified the Google session, validated workflow inputs, and tested the rating branches.
+- **What did you learn about workflow automation?** Describe how the webhook, validation, conditional status, Sheet append, and email fit together.
