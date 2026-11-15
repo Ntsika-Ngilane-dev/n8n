@@ -11,6 +11,7 @@ export function normalizeFeedback(user, body) {
   }
 
   return {
+    studentId: user.id,
     studentName: user.name,
     email: user.email,
     courseName,

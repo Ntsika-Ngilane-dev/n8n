@@ -35,6 +35,24 @@ test("Google session cookie is signed, readable, and cleared on sign-out", () =>
   }
 });
 
+test("admin role is derived from the server email allowlist for each session read", () => {
+  const originalSecret = process.env.SESSION_SECRET;
+  const originalAdmins = process.env.ADMIN_EMAILS;
+  process.env.SESSION_SECRET = "test-session-secret-with-at-least-32-characters";
+  process.env.ADMIN_EMAILS = "other@example.com, AVERY@example.com ";
+  try {
+    const cookie = createSessionCookie(user).split(";")[0];
+    assert.equal(getSessionUser(requestWithCookie(cookie)).role, "admin");
+    process.env.ADMIN_EMAILS = "other@example.com";
+    assert.equal(getSessionUser(requestWithCookie(cookie)).role, "student");
+  } finally {
+    if (originalSecret === undefined) delete process.env.SESSION_SECRET;
+    else process.env.SESSION_SECRET = originalSecret;
+    if (originalAdmins === undefined) delete process.env.ADMIN_EMAILS;
+    else process.env.ADMIN_EMAILS = originalAdmins;
+  }
+});
+
 test("feedback uses verified session identity, not client-supplied identity", () => {
   assert.deepEqual(normalizeFeedback(user, {
     studentName: "Someone Else",
@@ -43,6 +61,7 @@ test("feedback uses verified session identity, not client-supplied identity", ()
     rating: "2",
     feedbackMessage: "  Please add more examples.  ",
   }), {
+    studentId: user.id,
     studentName: "Avery Student",
     email: "avery@example.com",
     courseName: "Intro to UX",

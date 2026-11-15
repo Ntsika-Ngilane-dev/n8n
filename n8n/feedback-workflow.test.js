@@ -13,6 +13,7 @@ function validateSubmission(body) {
 }
 
 const validSubmission = {
+  studentId: "firebase-student-uid",
   studentName: "Avery Student",
   email: "avery@example.com",
   courseName: "Introduction to UX Design",
@@ -28,6 +29,7 @@ test("workflow accepts and normalizes a valid feedback submission", () => {
   });
 
   assert.equal(result.isValid, true);
+  assert.equal(result.studentId, "firebase-student-uid");
   assert.equal(result.studentName, "Avery Student");
   assert.equal(result.rating, 5);
   assert.deepEqual(result.errors, []);
@@ -37,6 +39,7 @@ test("workflow accepts and normalizes a valid feedback submission", () => {
 test("workflow rejects missing, malformed, non-text, and oversized fields", () => {
   const missing = validateSubmission({});
   assert.equal(missing.isValid, false);
+  assert.ok(missing.errors.some((error) => error.includes("studentId")));
   assert.ok(missing.errors.some((error) => error.includes("studentName")));
   assert.ok(missing.errors.some((error) => error.includes("rating")));
 
@@ -75,6 +78,7 @@ test("workflow maps every feedback field to the existing Sheet1 tab", () => {
   assert.equal(sheetsParameters.sheetName.value, "Sheet1");
   assert.deepEqual(Object.keys(sheetsParameters.columns.value), [
     "submittedAt",
+    "studentId",
     "studentName",
     "email",
     "courseName",
@@ -82,6 +86,19 @@ test("workflow maps every feedback field to the existing Sheet1 tab", () => {
     "feedbackMessage",
     "feedbackStatus",
   ]);
+});
+
+test("admin webhook requires header authentication and reads all sheet feedback", () => {
+  const webhook = nodes.get("Admin Feedback Webhook").parameters;
+  const reader = nodes.get("Read Feedback from Google Sheets").parameters;
+  assert.equal(webhook.httpMethod, "GET");
+  assert.equal(webhook.authentication, "headerAuth");
+  assert.equal(reader.operation, "read");
+  assert.equal(reader.sheetName.value, "Sheet1");
+  assert.equal(
+    workflow.connections["Admin Feedback Webhook"].main[0][0].node,
+    "Read Feedback from Google Sheets",
+  );
 });
 
 test("webhook response mode is compatible with n8n Respond to Webhook nodes", () => {

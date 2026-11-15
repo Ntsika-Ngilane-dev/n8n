@@ -7,6 +7,7 @@ import {
   getSessionUser,
 } from "./auth-session.js";
 import { verifyFirebaseCredential } from "./firebase-auth.js";
+import { fetchAdminFeedback } from "./admin-feedback.js";
 import { normalizeFeedback, sendFeedbackToWorkflow } from "./feedback.js";
 
 const app = express();
@@ -47,6 +48,19 @@ app.post("/api/auth/firebase", async (req, res, next) => {
 app.post("/api/auth/signout", (_req, res) => {
   res.setHeader("Set-Cookie", clearSessionCookie());
   res.json({ message: "Signed out." });
+});
+
+app.get("/api/admin/feedback", async (req, res, next) => {
+  try {
+    const user = getSessionUser(req);
+    if (!user) return res.status(401).json({ message: "Please sign in to continue." });
+    if (user.role !== "admin") {
+      return res.status(403).json({ message: "Admin access is required." });
+    }
+    res.json({ feedback: await fetchAdminFeedback() });
+  } catch (error) {
+    next(error);
+  }
 });
 
 app.post("/api/feedback", async (req, res, next) => {

@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { signOut as signOutFirebase } from "firebase/auth";
+import AdminDashboard from "./AdminDashboard.jsx";
 import AuthPanel from "./AuthPanel.jsx";
 import { firebaseAuth } from "./firebase.js";
 
@@ -100,6 +101,16 @@ function App() {
           onAuthenticated={setUser}
           initialError={authError}
         />
+        <SiteFooter />
+      </main>
+    );
+  }
+
+  if (user.role === "admin") {
+    return (
+      <main className="page-shell">
+        <SiteHeader user={user} onSignOut={signOut} />
+        <AdminDashboard />
         <SiteFooter />
       </main>
     );
@@ -257,7 +268,7 @@ function SiteHeader({ user, onSignOut }) {
         {user && (
           <>
             <span className="user-pill">
-              <span className="role-dot student" />
+              <span className={`role-dot ${user.role === "admin" ? "admin" : "student"}`} />
               {user.name}
             </span>
             <button className="signout-button" onClick={onSignOut}>Sign out</button>

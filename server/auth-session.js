@@ -4,6 +4,14 @@ import { validateEmail } from "./security.js";
 const SESSION_COOKIE = "feedback.sid";
 const SESSION_LIFETIME_SECONDS = 60 * 60 * 8;
 
+export function getUserRole(email) {
+  const adminEmails = (process.env.ADMIN_EMAILS ?? "")
+    .split(",")
+    .map((value) => value.trim().toLowerCase())
+    .filter(Boolean);
+  return adminEmails.includes(email.trim().toLowerCase()) ? "admin" : "student";
+}
+
 function getSessionSecret() {
   const secret = process.env.SESSION_SECRET;
   if (!secret || secret.length < 32) {
@@ -21,7 +29,6 @@ export function createSessionCookie(user) {
     id: user.id,
     name: user.name,
     email: user.email,
-    role: "student",
     expiresAt: Date.now() + SESSION_LIFETIME_SECONDS * 1000,
   };
   const payload = Buffer.from(JSON.stringify(session)).toString("base64url");
@@ -59,7 +66,6 @@ export function getSessionUser(request) {
         typeof session.name !== "string" ||
         typeof session.email !== "string" ||
         !validateEmail(session.email) ||
-        session.role !== "student" ||
         !Number.isFinite(session.expiresAt) ||
         session.expiresAt <= Date.now()) {
       return null;
@@ -68,7 +74,7 @@ export function getSessionUser(request) {
       id: session.id,
       name: session.name,
       email: session.email,
-      role: "student",
+      role: getUserRole(session.email),
     };
   } catch {
     return null;

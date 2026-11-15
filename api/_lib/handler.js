@@ -4,6 +4,7 @@ import {
   getSessionUser,
 } from "../../server/auth-session.js";
 import { verifyFirebaseCredential } from "../../server/firebase-auth.js";
+import { fetchAdminFeedback } from "../../server/admin-feedback.js";
 import { normalizeFeedback, sendFeedbackToWorkflow } from "../../server/feedback.js";
 
 function getRequestBody(req) {
@@ -48,6 +49,14 @@ export async function handleApiRequest(req, res) {
       return respond(res, 200, { message: "Signed out." }, {
         "Set-Cookie": clearSessionCookie(),
       });
+    }
+    if (route === "/api/admin/feedback" && method === "GET") {
+      const user = getSessionUser(req);
+      if (!user) return respond(res, 401, { message: "Please sign in to continue." });
+      if (user.role !== "admin") {
+        return respond(res, 403, { message: "Admin access is required." });
+      }
+      return respond(res, 200, { feedback: await fetchAdminFeedback() });
     }
     if (route === "/api/feedback" && method === "POST") {
       const user = getSessionUser(req);

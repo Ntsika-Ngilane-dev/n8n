@@ -1,4 +1,5 @@
 import { cleanText, validateEmail } from "./security.js";
+import { getUserRole } from "./auth-session.js";
 
 const invalidCredentialCodes = new Set([
   "INVALID_ID_TOKEN",
@@ -74,6 +75,6 @@ export async function verifyFirebaseCredential(credential) {
     id: user.localId,
     email: user.email.trim().toLowerCase(),
     name: cleanText(user.displayName || user.email, 100) || user.email,
-    role: "student",
+    role: getUserRole(user.email),
   };
 }

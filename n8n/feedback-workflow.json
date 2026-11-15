@@ -22,7 +22,25 @@
     },
     {
       "parameters": {
-        "jsCode": "const textLimits = { studentName: 100, email: 254, courseName: 150, feedbackMessage: 2000 };\nconst emailPattern = /^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/;\n\nreturn $input.all().map((item) => {\n  const payload = item.json.body ?? item.json;\n  const body = payload && typeof payload === 'object' && !Array.isArray(payload) ? payload : {};\n  const errors = [];\n  const values = {};\n\n  for (const [key, maxLength] of Object.entries(textLimits)) {\n    if (typeof body[key] !== 'string') {\n      errors.push(`${key} must be text`);\n      values[key] = '';\n      continue;\n    }\n    values[key] = body[key].trim();\n    if (!values[key]) errors.push(`${key} is required`);\n    if (values[key].length > maxLength) errors.push(`${key} must be ${maxLength} characters or fewer`);\n  }\n\n  if (values.email && !emailPattern.test(values.email)) errors.push('email must be valid');\n  const rawRating = body.rating;\n  const rating = typeof rawRating === 'number'\n    ? rawRating\n    : typeof rawRating === 'string' && /^[1-5]$/.test(rawRating.trim())\n      ? Number(rawRating.trim())\n      : NaN;\n  if (!Number.isInteger(rating) || rating < 1 || rating > 5) {\n    errors.push('rating must be an integer from 1 to 5');\n  }\n\n  return {\n    json: {\n      isValid: errors.length === 0,\n      errors,\n      ...values,\n      rating: Number.isNaN(rating) ? null : rating,\n      submittedAt: new Date().toISOString()\n    }\n  };\n});"
+        "httpMethod": "GET",
+        "path": "student-feedback-admin",
+        "authentication": "headerAuth",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "746c7f7a-f14a-4a0f-9964-7a8c44101432",
+      "name": "Admin Feedback Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -760,
+        620
+      ],
+      "webhookId": "9d631a98-ec08-4a97-bf67-31b7aef7037e"
+    },
+    {
+      "parameters": {
+        "jsCode": "const textLimits = { studentId: 128, studentName: 100, email: 254, courseName: 150, feedbackMessage: 2000 };\nconst emailPattern = /^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/;\n\nreturn $input.all().map((item) => {\n  const payload = item.json.body ?? item.json;\n  const body = payload && typeof payload === 'object' && !Array.isArray(payload) ? payload : {};\n  const errors = [];\n  const values = {};\n\n  for (const [key, maxLength] of Object.entries(textLimits)) {\n    if (typeof body[key] !== 'string') {\n      errors.push(`${key} must be text`);\n      values[key] = '';\n      continue;\n    }\n    values[key] = body[key].trim();\n    if (!values[key]) errors.push(`${key} is required`);\n    if (values[key].length > maxLength) errors.push(`${key} must be ${maxLength} characters or fewer`);\n  }\n\n  if (values.email && !emailPattern.test(values.email)) errors.push('email must be valid');\n  const rawRating = body.rating;\n  const rating = typeof rawRating === 'number'\n    ? rawRating\n    : typeof rawRating === 'string' && /^[1-5]$/.test(rawRating.trim())\n      ? Number(rawRating.trim())\n      : NaN;\n  if (!Number.isInteger(rating) || rating < 1 || rating > 5) {\n    errors.push('rating must be an integer from 1 to 5');\n  }\n\n  return {\n    json: {\n      isValid: errors.length === 0,\n      errors,\n      ...values,\n      rating: Number.isNaN(rating) ? null : rating,\n      submittedAt: new Date().toISOString()\n    }\n  };\n});"
       },
       "id": "bb684589-eb20-49a3-b4b9-8b301c3ef6ef",
       "name": "Validate Feedback",
@@ -193,6 +211,7 @@
           "mappingMode": "defineBelow",
           "value": {
             "submittedAt": "={{ $json.submittedAt }}",
+            "studentId": "={{ $json.studentId }}",
             "studentName": "={{ $json.studentName }}",
             "email": "={{ $json.email }}",
             "courseName": "={{ $json.courseName }}",
@@ -205,6 +224,15 @@
             {
               "id": "submittedAt",
               "displayName": "submittedAt",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "studentId",
+              "displayName": "studentId",
               "required": false,
               "defaultMatch": false,
               "display": true,
@@ -282,6 +310,56 @@
     },
     {
       "parameters": {
+        "resource": "sheet",
+        "operation": "read",
+        "documentId": {
+          "__rl": true,
+          "value": "1S5ODqTPFpVGAvGJ5TBk1EKUA5knlO8kw3gQGlpjCvr8",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Sheet1",
+          "mode": "name"
+        },
+        "options": {}
+      },
+      "id": "e1f03eae-a595-4b6f-82fe-8dbca7f7df18",
+      "name": "Read Feedback from Google Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        -520,
+        620
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { feedback: $input.all().map((item) => item.json) } }}",
+        "options": {
+          "responseCode": 200,
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Cache-Control",
+                "value": "no-store"
+              }
+            ]
+          }
+        }
+      },
+      "id": "7650aa15-1e4d-40e3-bf31-1b60c85bd3e5",
+      "name": "Return Admin Feedback",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        -280,
+        620
+      ]
+    },
+    {
+      "parameters": {
         "resource": "message",
         "operation": "send",
         "sendTo": "={{ $('Validate Feedback').item.json.email }}",
@@ -331,6 +409,28 @@
         [
           {
             "node": "Validate Feedback",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Admin Feedback Webhook": {
+      "main": [
+        [
+          {
+            "node": "Read Feedback from Google Sheets",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Feedback from Google Sheets": {
+      "main": [
+        [
+          {
+            "node": "Return Admin Feedback",
             "type": "main",
             "index": 0
           }
