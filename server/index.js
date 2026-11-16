@@ -78,7 +78,7 @@ app.post("/api/feedback", async (req, res, next) => {
 app.use((error, _req, res, _next) => {
   console.error("Feedback API request failed:", error.message);
   const status = Number.isInteger(error.status) ? error.status : 500;
-  const message = status < 500 ? error.message : "The request could not be completed.";
+  const message = status < 500 ? error.message : error.publicMessage ?? "The request could not be completed.";
   res.status(status).json({ message });
 });
 

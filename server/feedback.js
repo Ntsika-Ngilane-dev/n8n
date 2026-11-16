@@ -25,6 +25,7 @@ export async function sendFeedbackToWorkflow(feedback) {
   if (!webhookUrl) {
     const error = new Error("The feedback workflow is not configured.");
     error.status = 503;
+    error.publicMessage = "Feedback submission is unavailable. Configure N8N_WEBHOOK_URL with the active n8n production webhook.";
     throw error;
   }
 
@@ -39,12 +40,16 @@ export async function sendFeedbackToWorkflow(feedback) {
   } catch (cause) {
     const error = new Error("Could not reach the feedback workflow. Please try again.", { cause });
     error.status = 502;
+    error.publicMessage = "Could not reach the feedback workflow. Check N8N_WEBHOOK_URL and try again.";
     throw error;
   }
 
   if (!response.ok) {
-    const error = new Error("The feedback workflow could not confirm your submission. Please try again.");
+    const error = new Error(`The feedback workflow returned HTTP ${response.status}.`);
     error.status = 502;
+    error.publicMessage = response.status === 404
+      ? "The feedback endpoint returned 404. Set N8N_WEBHOOK_URL to the active Production URL from the correct n8n workflow, then redeploy."
+      : `The feedback workflow returned HTTP ${response.status}. Check the n8n execution logs and Google Sheets configuration.`;
     throw error;
   }
 }

@@ -116,6 +116,36 @@ test("serverless feedback sends verified student data to n8n without a database"
   }
 });
 
+test("serverless feedback explains how to fix an n8n webhook 404", async () => {
+  const originalSecret = process.env.SESSION_SECRET;
+  const originalWebhook = process.env.N8N_WEBHOOK_URL;
+  const originalFetch = globalThis.fetch;
+  process.env.SESSION_SECRET = "test-session-secret-with-at-least-32-characters";
+  process.env.N8N_WEBHOOK_URL = "https://n8n.example/webhook/student-feedback";
+  const cookie = createSessionCookie({
+    id: "google-sub-123",
+    name: "Avery Student",
+    email: "avery@example.com",
+  }).split(";")[0];
+  globalThis.fetch = async () => ({ ok: false, status: 404 });
+
+  try {
+    const response = await request("/api/feedback", "POST", { cookie }, {
+      courseName: "Introduction to UX",
+      rating: 5,
+      feedbackMessage: "The exercises were helpful.",
+    });
+    assert.equal(response.statusCode, 502);
+    assert.match(response.body.message, /N8N_WEBHOOK_URL.*active Production URL/);
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (originalSecret === undefined) delete process.env.SESSION_SECRET;
+    else process.env.SESSION_SECRET = originalSecret;
+    if (originalWebhook === undefined) delete process.env.N8N_WEBHOOK_URL;
+    else process.env.N8N_WEBHOOK_URL = originalWebhook;
+  }
+});
+
 test("admin feedback endpoint denies students and returns sheet rows only to allowlisted admins", async () => {
   const originalSecret = process.env.SESSION_SECRET;
   const originalWebhook = process.env.N8N_ADMIN_WEBHOOK_URL;

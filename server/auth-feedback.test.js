@@ -102,3 +102,28 @@ test("feedback is sent to the configured n8n workflow", async () => {
     else process.env.N8N_WEBHOOK_URL = originalUrl;
   }
 });
+
+test("n8n webhook errors give actionable guidance without exposing the upstream response body", async () => {
+  const originalUrl = process.env.N8N_WEBHOOK_URL;
+  const originalFetch = globalThis.fetch;
+  process.env.N8N_WEBHOOK_URL = "https://n8n.example/webhook/student-feedback";
+  globalThis.fetch = async () => ({
+    ok: false,
+    status: 404,
+    text: async () => "private upstream response",
+  });
+
+  try {
+    await assert.rejects(sendFeedbackToWorkflow({}), (error) => {
+      assert.equal(error.status, 502);
+      assert.match(error.message, /HTTP 404/);
+      assert.match(error.publicMessage, /N8N_WEBHOOK_URL.*active Production URL/);
+      assert.doesNotMatch(error.publicMessage, /private upstream response/);
+      return true;
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (originalUrl === undefined) delete process.env.N8N_WEBHOOK_URL;
+    else process.env.N8N_WEBHOOK_URL = originalUrl;
+  }
+});
