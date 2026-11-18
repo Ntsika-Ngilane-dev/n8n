@@ -1,6 +1,7 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 const milestones = [1, 5, 10];
+const AUTO_REFRESH_INTERVAL_MS = 15_000;
 
 function getStudentKey(feedback) {
   return feedback.studentId || feedback.email.toLowerCase();
@@ -47,8 +48,11 @@ function AdminDashboard() {
   const [feedback, setFeedback] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState("");
+  const isRefreshing = useRef(false);
 
   const refresh = useCallback(async () => {
+    if (isRefreshing.current) return;
+    isRefreshing.current = true;
     setIsLoading(true);
     setError("");
     try {
@@ -57,11 +61,24 @@ function AdminDashboard() {
       setError(loadError.message);
     } finally {
       setIsLoading(false);
+      isRefreshing.current = false;
     }
   }, []);
 
   useEffect(() => {
-    refresh();
+    void refresh();
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === "visible") void refresh();
+    };
+    const intervalId = window.setInterval(refreshWhenVisible, AUTO_REFRESH_INTERVAL_MS);
+    document.addEventListener("visibilitychange", refreshWhenVisible);
+    window.addEventListener("focus", refreshWhenVisible);
+
+    return () => {
+      window.clearInterval(intervalId);
+      document.removeEventListener("visibilitychange", refreshWhenVisible);
+      window.removeEventListener("focus", refreshWhenVisible);
+    };
   }, [refresh]);
 
   const analytics = useMemo(() => {
@@ -101,9 +118,12 @@ function AdminDashboard() {
             Review submissions, track participation, and celebrate student milestones.
           </p>
         </div>
-        <button className="refresh-button" type="button" onClick={refresh} disabled={isLoading}>
-          {isLoading ? "Refreshing…" : "Refresh"}
-        </button>
+        <div className="dashboard-refresh-controls">
+          <span className="admin-caption">Auto-refreshes every 15 seconds</span>
+          <button className="refresh-button" type="button" onClick={refresh} disabled={isLoading}>
+            {isLoading ? "Refreshing…" : "Refresh"}
+          </button>
+        </div>
       </div>
 
       {error && (

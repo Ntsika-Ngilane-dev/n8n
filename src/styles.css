@@ -717,6 +717,12 @@ h2 {
   margin-bottom: 0;
 }
 
+.dashboard-refresh-controls {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
 .dashboard-badge {
   flex: 0 0 auto;
   padding: 10px 12px;
