@@ -1,8 +1,9 @@
 import { cleanText, validateEmail } from "./security.js";
 
-function createAdminFeedbackError(message, status, cause) {
+function createAdminFeedbackError(message, status, cause, publicMessage) {
   const error = new Error(message, cause ? { cause } : undefined);
   error.status = status;
+  if (publicMessage) error.publicMessage = publicMessage;
   return error;
 }
 
@@ -66,7 +67,36 @@ export async function fetchAdminFeedback() {
   }
 
   if (!response.ok) {
-    throw createAdminFeedbackError("The admin feedback workflow could not load feedback.", 502);
+    if (response.status === 401 || response.status === 403) {
+      throw createAdminFeedbackError(
+        `The admin feedback workflow rejected its credentials (HTTP ${response.status}).`,
+        502,
+        undefined,
+        "The admin feedback workflow rejected its credentials. Check that N8N_ADMIN_WEBHOOK_TOKEN matches the n8n Header Auth credential.",
+      );
+    }
+    if (response.status === 404) {
+      throw createAdminFeedbackError(
+        "The admin feedback webhook was not found (HTTP 404).",
+        502,
+        undefined,
+        "The admin feedback webhook was not found. Check that N8N_ADMIN_WEBHOOK_URL is the active Production webhook URL.",
+      );
+    }
+    if (response.status >= 500) {
+      throw createAdminFeedbackError(
+        `The admin feedback workflow failed (HTTP ${response.status}).`,
+        502,
+        undefined,
+        "The admin feedback workflow failed to read feedback. Check the n8n execution and Google Sheets configuration.",
+      );
+    }
+    throw createAdminFeedbackError(
+      `The admin feedback workflow returned HTTP ${response.status ?? "an error"}.`,
+      502,
+      undefined,
+      "The admin feedback workflow could not load feedback. Check the n8n workflow configuration.",
+    );
   }
 
   let result;

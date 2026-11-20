@@ -208,7 +208,7 @@ function AdminDashboard() {
         <div className="admin-section-heading reviews-toolbar">
           <div>
             <p className="card-kicker">ALL RESPONSES</p>
-            <h2 id="submissions-title">Recent submissions</h2>
+            <h2 id="submissions-title">All submitted reviews</h2>
           </div>
           <span className="admin-caption">{feedback.length} total</span>
         </div>

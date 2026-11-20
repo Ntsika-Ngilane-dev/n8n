@@ -73,3 +73,37 @@ test("admin feedback configuration fails explicitly when the protected webhook i
     else process.env.N8N_ADMIN_WEBHOOK_TOKEN = originalToken;
   }
 });
+
+test("admin webhook failures explain which production setting to check", async () => {
+  const originalUrl = process.env.N8N_ADMIN_WEBHOOK_URL;
+  const originalToken = process.env.N8N_ADMIN_WEBHOOK_TOKEN;
+  const originalFetch = globalThis.fetch;
+  process.env.N8N_ADMIN_WEBHOOK_URL = "https://n8n.example/webhook/student-feedback-admin";
+  process.env.N8N_ADMIN_WEBHOOK_TOKEN = "test-token";
+  globalThis.fetch = async () => ({ ok: false, status: 403 });
+
+  try {
+    await assert.rejects(fetchAdminFeedback(), {
+      status: 502,
+      publicMessage: /N8N_ADMIN_WEBHOOK_TOKEN/,
+    });
+
+    globalThis.fetch = async () => ({ ok: false, status: 404 });
+    await assert.rejects(fetchAdminFeedback(), {
+      status: 502,
+      publicMessage: /N8N_ADMIN_WEBHOOK_URL/,
+    });
+
+    globalThis.fetch = async () => ({ ok: false, status: 500 });
+    await assert.rejects(fetchAdminFeedback(), {
+      status: 502,
+      publicMessage: /n8n execution and Google Sheets/,
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (originalUrl === undefined) delete process.env.N8N_ADMIN_WEBHOOK_URL;
+    else process.env.N8N_ADMIN_WEBHOOK_URL = originalUrl;
+    if (originalToken === undefined) delete process.env.N8N_ADMIN_WEBHOOK_TOKEN;
+    else process.env.N8N_ADMIN_WEBHOOK_TOKEN = originalToken;
+  }
+});

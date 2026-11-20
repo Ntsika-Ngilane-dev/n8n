@@ -167,8 +167,12 @@ test("admin feedback endpoint denies students and returns sheet rows only to all
     email: "student@example.com",
   }).split(";")[0];
   let upstreamRequest;
+  let upstreamStatus;
   globalThis.fetch = async (...args) => {
     upstreamRequest = args;
+    if (upstreamStatus !== undefined) {
+      return { ok: false, status: upstreamStatus };
+    }
     return {
       ok: true,
       json: async () => ({
@@ -197,6 +201,11 @@ test("admin feedback endpoint denies students and returns sheet rows only to all
     assert.equal(upstreamRequest[1].headers["X-Admin-Token"], "test-admin-token");
     assert.equal(response.body.feedback[0].studentId, "firebase-student-uid");
     assert.equal(response.body.feedback[0].rating, 4);
+
+    upstreamStatus = 403;
+    const failed = await request("/api/admin/feedback", "GET", { cookie: adminCookie });
+    assert.equal(failed.statusCode, 502);
+    assert.match(failed.body.message, /N8N_ADMIN_WEBHOOK_TOKEN/);
   } finally {
     globalThis.fetch = originalFetch;
     if (originalSecret === undefined) delete process.env.SESSION_SECRET;
